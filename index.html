@@ -448,91 +448,155 @@
         }
 
         // Smart Rubric Evaluator: 7 steps × 2 points = 14 total points
-        function evaluateStudentSubmission(code, stdout, hasError) {
-            let checks = [false, false, false, false, false, false, false];
-            const cleanCode = code.replace(/\s+/g, ' ');
-            const outputLines = stdout.trim().split("\n").map(l => l.trim()).filter(Boolean);
+       // دالة تحليل واستخراج بنية القواميس من أي سطر مخرجات
+        function parseDictsFromOutput(stdout) {
+    const lines = stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    const parsedDicts = [];
 
-            // Step 1: Definition of Subjects with math=90 and science=85 (supports english or original names)
-            const hasSubjectsCreation = (/Subjects\s*=\s*\{.*?(math|الرياضيات).*?90.*?(science|العلوم).*?85.*?\}/is.test(cleanCode) ||
-                                         /Subjects\s*=\s*\{.*?(science|العلوم).*?85.*?(math|الرياضيات).*?90.*?\}/is.test(cleanCode) ||
-                                         (cleanCode.includes("Subjects") && cleanCode.includes("90") && cleanCode.includes("85")));
-            if (hasSubjectsCreation) checks[0] = true;
+    // البحث عن أي نص بين حاصرتين {...} في سطور المخرجات
+    const dictRegex = /\{([^{}]+)\}/g;
 
-            // Step 2: First print of the dictionary (should contain both 90 and 85, before adding 88)
-            const firstPrintMatched = outputLines.length >= 1 && (
-                (outputLines[0].includes("90") && outputLines[0].includes("85")) ||
-                (stdout.includes("90") && stdout.includes("85"))
-            );
-            if (firstPrintMatched) checks[1] = true;
-
-            // Step 3: Add new subject: arabic = 88
-            const hasAddedArabic = (/Subjects\[['"](arabic|لغتي)['"]\]\s*=\s*88/i.test(cleanCode) ||
-                                    /Subjects\.update\(.*?['"](arabic|لغتي)['"]\s*:\s*88.*?\)/i.test(cleanCode) ||
-                                    (cleanCode.includes("88") && (cleanCode.toLowerCase().includes("arabic") || cleanCode.includes("لغتي"))));
-            if (hasAddedArabic) checks[2] = true;
-
-            // Step 4: Print dictionary after adding arabic (contains 88 and 85)
-            const hasPrintWithArabic = outputLines.some(line => line.includes("88")) || stdout.includes("88");
-            if (hasPrintWithArabic) checks[3] = true;
-
-            // Step 5: Update math grade to 95
-            const hasUpdatedMath = (/Subjects\[['"](math|الرياضيات)['"]\]\s*=\s*95/i.test(cleanCode) ||
-                                    /Subjects\.update\(.*?['"](math|الرياضيات)['"]\s*:\s*95.*?\)/i.test(cleanCode) ||
-                                    (cleanCode.includes("95") && (cleanCode.toLowerCase().includes("math") || cleanCode.includes("الرياضيات"))));
-            if (hasUpdatedMath) checks[4] = true;
-
-            // Step 6: Delete science subject
-            const hasDeletedScience = (/del\s+Subjects\[['"](science|العلوم)['"]\]/i.test(cleanCode) ||
-                                       /Subjects\.pop\(['"](science|العلوم)['"]\)/i.test(cleanCode));
-            if (hasDeletedScience) checks[5] = true;
-
-            // Step 7: Print dictionary after modification & deletion (final line contains 95 and not 85)
-            const lastLine = outputLines[outputLines.length - 1] || "";
-            const finalPrintCorrect = (outputLines.length >= 3 && lastLine.includes("95") && !lastLine.includes("85")) ||
-                                      (stdout.includes("95") && !lastLine.includes("85") && outputLines.length >= 2);
-            if (finalPrintCorrect) checks[6] = true;
-
-            // Calculate total score: 2 points per step
-            const pointsPerStep = 2;
-            let totalScore = 0;
-            checks.forEach((passed) => {
-                if (passed && !hasError) totalScore += pointsPerStep;
-            });
-
-            // Update UI elements for 7 steps
-            for (let i = 1; i <= 7; i++) {
-                const checkEl = document.getElementById(`check-${i}`);
-                if (checkEl) {
-                    const icon = checkEl.querySelector('.check-icon');
-                    if (checks[i - 1] && !hasError) {
-                        checkEl.className = "flex items-center justify-between p-2 rounded-lg bg-emerald-50 border border-emerald-200 transition";
-                        icon.className = "fa-solid fa-circle-check text-emerald-600 check-icon";
-                    } else {
-                        checkEl.className = "flex items-center justify-between p-2 rounded-lg bg-rose-50/70 border border-rose-100 transition";
-                        icon.className = "fa-solid fa-circle-xmark text-rose-500 check-icon";
+    lines.forEach((line) => {
+        let match;
+        while ((match = dictRegex.exec(line)) !== null) {
+            const rawBody = match[1];
+            const dictObj = {};
+            // تفكيك المفاتيح والقيم مهما كان نوع علامات التنصيص أو المسافات
+            const pairs = rawBody.split(',');
+            pairs.forEach(pair => {
+                const parts = pair.split(':');
+                if (parts.length === 2) {
+                    // تنظيف المفتاح من المسافات وعلامات التنصيص الفردية والمزدوجة
+                    const key = parts[0].trim().replace(/^['"]|['"]$/g, '').toLowerCase();
+                    const val = parseInt(parts[1].trim(), 10);
+                    if (key && !isNaN(val)) {
+                        dictObj[key] = val;
                     }
                 }
+            });
+            if (Object.keys(dictObj).length > 0) {
+                parsedDicts.push(dictObj);
             }
-
-            const scoreBadge = document.getElementById('score-badge');
-            scoreBadge.innerText = `الدرجة: ${totalScore} / 14`;
-            if (totalScore === 14) {
-                scoreBadge.className = "bg-emerald-100 text-emerald-800 font-extrabold text-sm px-3.5 py-1 rounded-full border border-emerald-300";
-                showToast("ممتاز! حققت الدرجة الكاملة 14/14", "success");
-            } else {
-                scoreBadge.className = "bg-amber-100 text-amber-800 font-extrabold text-sm px-3.5 py-1 rounded-full border border-amber-300";
-            }
-
-            // Store state for submission
-            currentEvaluation = {
-                score: totalScore,
-                checks: checks,
-                output: stdout || (hasError ? errorText : "No Output"),
-                error: hasError ? errorText : null
-            };
         }
+    });
 
+    return parsedDicts;
+}
+       
+        function evaluateStudentSubmission(code, stdout, hasError) {
+    let checks = [false, false, false, false, false, false, false];
+
+    // 1. تنظيف الكود من التعليقات البرمجية (#) لضمان عدم احتساب الشرح
+    const codeWithoutComments = code
+        .split("\n")
+        .map(line => line.split("#")[0])
+        .join("\n");
+
+    const cleanCode = codeWithoutComments.replace(/\s+/g, ' ');
+    
+    // 2. استخراج وفحص القواميس المطبوعة منطقياً
+    const printedDicts = parseDictsFromOutput(stdout);
+
+    // ==========================================
+    // الخطوة 1: تعريف القاموس في الكود
+    // ==========================================
+    const hasSubjectsCreation = /Subjects\s*=\s*\{(?=.*['"](math|الرياضيات)['"]\s*:\s*90)(?=.*['"](science|العلوم)['"]\s*:\s*85).*\}/i.test(cleanCode);
+    if (hasSubjectsCreation) checks[0] = true;
+
+    // ==========================================
+    // الخطوة 2: طباعة القاموس الأولية
+    // الحالة المطلوبة: يحتوي math: 90 و science: 85 فقط (دون arabic ودون 95)
+    // ==========================================
+    const firstPrintIndex = printedDicts.findIndex(d => 
+        (d['math'] === 90 || d['الرياضيات'] === 90) &&
+        (d['science'] === 85 || d['العلوم'] === 85) &&
+        !d['arabic'] && !d['لغتي']
+    );
+    if (firstPrintIndex !== -1) checks[1] = true;
+
+    // ==========================================
+    // الخطوة 3: إضافة مادة arabic = 88 كوداً
+    // ==========================================
+    const hasAddedArabic = /Subjects\s*\[\s*['"](arabic|لغتي)['"]\s*\]\s*=\s*88/i.test(cleanCode) ||
+                           /Subjects\.update\(\s*\{.*['"](arabic|لغتي)['"]\s*:\s*88.*\}\s*\)/i.test(cleanCode);
+    if (hasAddedArabic) checks[2] = true;
+
+    // ==========================================
+    // الخطوة 4: طباعة القاموس بعد إضافة arabic
+    // الحالة المطلوبة: يحتوي arabic: 88 إلى جانب المواد السابقة
+    // ويجب أن تظهر في سطر طباعة لاحق للطباعة الأولى (إن وجدت)
+    // ==========================================
+    const secondPrintIndex = printedDicts.findIndex((d, idx) => 
+        idx >= firstPrintIndex &&
+        (d['arabic'] === 88 || d['لغتي'] === 88) &&
+        (d['science'] === 85 || d['العلوم'] === 85)
+    );
+    if (secondPrintIndex !== -1) checks[3] = true;
+
+    // ==========================================
+    // الخطوة 5: تعديل درجة math إلى 95 كوداً
+    // ==========================================
+    const hasUpdatedMath = /Subjects\s*\[\s*['"](math|الرياضيات)['"]\s*\]\s*=\s*95/i.test(cleanCode) ||
+                           /Subjects\.update\(\s*\{.*['"](math|الرياضيات)['"]\s*:\s*95.*\}\s*\)/i.test(cleanCode);
+    if (hasUpdatedMath) checks[4] = true;
+
+    // ==========================================
+    // الخطوة 6: حذف مادة science كوداً
+    // ==========================================
+    const hasDeletedScience = /del\s+Subjects\s*\[\s*['"](science|العلوم)['"]\s*\]/i.test(cleanCode) ||
+                               /Subjects\.pop\(\s*['"](science|العلوم)['"]\s*\)/i.test(cleanCode);
+    if (hasDeletedScience) checks[5] = true;
+
+    // ==========================================
+    // الخطوة 7: الطباعة النهائية بعد الحذف والتعديل
+    // الحالة المطلوبة: math: 95، arabic: 88، وبدون science نهائياً
+    // ==========================================
+    const finalPrintIndex = printedDicts.findIndex((d, idx) => 
+        idx >= secondPrintIndex &&
+        (d['math'] === 95 || d['الرياضيات'] === 95) &&
+        (d['arabic'] === 88 || d['لغتي'] === 88) &&
+        !d['science'] && !d['العلوم']
+    );
+    if (finalPrintIndex !== -1) checks[6] = true;
+
+    // احتساب المجموع
+    const pointsPerStep = 2;
+    let totalScore = 0;
+    checks.forEach(passed => {
+        if (passed && !hasError) totalScore += pointsPerStep;
+    });
+
+    // تحديث الواجهة
+    for (let i = 1; i <= 7; i++) {
+        const checkEl = document.getElementById(`check-${i}`);
+        if (checkEl) {
+            const icon = checkEl.querySelector('.check-icon');
+            if (checks[i - 1] && !hasError) {
+                checkEl.className = "flex items-center justify-between p-2 rounded-lg bg-emerald-50 border border-emerald-200 transition";
+                icon.className = "fa-solid fa-circle-check text-emerald-600 check-icon";
+            } else {
+                checkEl.className = "flex items-center justify-between p-2 rounded-lg bg-rose-50/70 border border-rose-100 transition";
+                icon.className = "fa-solid fa-circle-xmark text-rose-500 check-icon";
+            }
+        }
+    }
+
+    const scoreBadge = document.getElementById('score-badge');
+    scoreBadge.innerText = `الدرجة: ${totalScore} / 14`;
+    if (totalScore === 14) {
+        scoreBadge.className = "bg-emerald-100 text-emerald-800 font-extrabold text-sm px-3.5 py-1 rounded-full border border-emerald-300";
+        showToast("ممتاز! حققت الدرجة الكاملة 14/14", "success");
+    } else {
+        scoreBadge.className = "bg-amber-100 text-amber-800 font-extrabold text-sm px-3.5 py-1 rounded-full border border-amber-300";
+    }
+
+    currentEvaluation = {
+        score: totalScore,
+        checks: checks,
+        output: stdout || (hasError ? errorText : "No Output"),
+        error: hasError ? errorText : null
+    };
+}
         // Send Test Results to Google Sheet via Google Apps Script
         async function submitExamToSheet() {
             const studentName = document.getElementById('student-name').value.trim();
