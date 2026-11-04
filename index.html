@@ -233,7 +233,7 @@
                 </div>
 
                 <div class="relative flex-1">
-                    <textarea id="python-code" dir="ltr"
+                    <textarea id="python-code" dir="ltr" ondrop="return false;"
                         class="w-full h-80 lg:h-[420px] bg-slate-950 text-slate-100 p-4 code-font text-sm leading-relaxed border-x border-slate-700 focus:outline-none focus:ring-0 resize-none font-mono"
                         spellcheck="false" placeholder="# Write your Python code here..."></textarea>
                 </div>
@@ -766,13 +766,53 @@
         });
 
         // 2. منع أحداث النسخ واللصق والقص عبر الماوس أو القوائم
-        ['copy', 'paste', 'cut'].forEach(eventType => {
+        ['copy', 'paste', 'cut', 'drop', 'dragstart'].forEach(eventType => {
             document.addEventListener(eventType, function (e) {
                 e.preventDefault();
-                const actionName = eventType === 'copy' ? 'النسخ' : eventType === 'paste' ? 'اللصق' : 'القص';
+                const actionName = eventType === 'copy' ? 'النسخ' : eventType === 'paste' ? 'اللصق' : eventType === 'cut' ? 'القص' : 'السحب والإفلات';
                 showToast(`عملية ${actionName} معطلة داخل الاختبار!`, "warning");
             });
         });
+
+        // 2.1 حماية إضافية لكيبورد الجوال (Clipboard Bar / Gboard / iOS)
+        const codeEditor = document.getElementById('python-code');
+        if (codeEditor) {
+            let lastValidValue = codeEditor.value;
+
+            // تحديث القيمة السابقة عند أي تفاعل طبيعي
+            codeEditor.addEventListener('focus', () => { lastValidValue = codeEditor.value; });
+            codeEditor.addEventListener('change', () => { lastValidValue = codeEditor.value; });
+
+            // التقاط نوع الإدخال لمنع لصق لوحة مفاتيح الجوال
+            codeEditor.addEventListener('beforeinput', function (e) {
+                // أنواع إدخال اللصق في المتصفحات ولوحات المفاتيح الذكية
+                if (e.inputType === 'insertFromPaste' ||
+                    e.inputType === 'insertFromPasteAsQuotation' ||
+                    e.inputType === 'insertReplacementText' ||
+                    e.inputType === 'insertFromDrop') {
+                    e.preventDefault();
+                    showToast("اللصق من لوحة المفاتيح معطل داخل الاختبار!", "warning");
+                    return false;
+                }
+            });
+
+            // كشف القفزات الكبيرة المفاجئة في النص (fallback إذا لم يدعم الكيبورد beforeinput)
+            codeEditor.addEventListener('input', function (e) {
+                const currentVal = codeEditor.value;
+                const lengthDiff = currentVal.length - lastValidValue.length;
+
+                // لو أُدخل أكثر من حرفين دفعة واحدة دون أن يكون ضغط زر Enter عادي
+                if (lengthDiff > 2 && e.inputType !== 'insertLineBreak' && e.inputType !== 'insertParagraph') {
+                    // إذا كان إدخال لصق أو إدخال نص مجمّع من الحافظة
+                    if (!e.isComposing) {
+                        codeEditor.value = lastValidValue;
+                        showToast("تم إلغاء الإدخال المنسوخ من لوحة المفاتيح!", "warning");
+                        return;
+                    }
+                }
+                lastValidValue = codeEditor.value;
+            });
+        }
 
         // 3. منع اختصارات لوحة المفاتيح الشهيرة للنسخ واللصق وفحص الصفحة
         document.addEventListener('keydown', function (e) {
